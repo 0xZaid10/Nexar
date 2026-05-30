@@ -1,0 +1,14 @@
+.env
+node_modules/
+artifacts/
+cache/
+dist/
+typechain-types/
+.env.deployed
+demo/
+*.db-shm
+*.db-wal
+hardhat.config.cjs
+hardhat.config.ts
+tsconfig.json
+vitest.config.ts

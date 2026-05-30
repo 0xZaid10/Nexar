@@ -1,0 +1,59 @@
+{
+  "compilerOptions": {
+    // Target and module
+    "target":         "ES2022",
+    "module":         "NodeNext",
+    "moduleResolution":"NodeNext",
+    "lib":            ["ES2022"],
+
+    // Output
+    "outDir":         "./dist",
+    "rootDir":        ".",
+    "declaration":    true,
+    "declarationMap": true,
+    "sourceMap":      true,
+
+    // Strictness
+    "strict":                      true,
+    "noUncheckedIndexedAccess":    true,
+    "noImplicitOverride":          true,
+    "exactOptionalPropertyTypes":  true,
+    "noPropertyAccessFromIndexSignature": true,
+
+    // Interop
+    "esModuleInterop":      true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule":    true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Path aliases — import from @nexar/sdk etc.
+    "baseUrl": ".",
+    "paths": {
+      "@nexar/core":      ["./src/core/index.ts"],
+      "@nexar/sdk":       ["./src/sdk/index.ts"],
+      "@nexar/auth":      ["./src/auth/index.ts"],
+      "@nexar/licensing": ["./src/licensing/index.ts"],
+      "@nexar/runtime":   ["./src/runtime/index.ts"],
+      "@nexar/agents":    ["./src/agents/index.ts"]
+    },
+
+    // Skip lib checks for third-party types
+    "skipLibCheck": true
+  },
+
+  "include": [
+    "src/**/*",
+    "scripts/**/*",
+    "demo/**/*",
+    "test/**/*",
+    "hardhat.config.ts"
+  ],
+
+  "exclude": [
+    "node_modules",
+    "dist",
+    "artifacts",
+    "cache",
+    "typechain-types"
+  ]
+}
