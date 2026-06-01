@@ -9,3 +9,6 @@ demo/
 *.db-shm
 *.db-wal
 scripts
+package-lock.json
+nexar-test.db
+nexar.db
