@@ -94,9 +94,9 @@ assetRouter.post(
     const db = getDB();
     try {
       db.prepare(
-        `INSERT OR IGNORE INTO assets (ip_id, vault_uuid, tier, owner, name, asset_type)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(asset.ipId, asset.vaultUuid.toString(), resolvedTier, ownerAddress, name, String(tier).toUpperCase());
+        `INSERT OR IGNORE INTO assets (ip_id, vault_uuid, tier, owner, name, asset_type, license_terms_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(asset.ipId, asset.vaultUuid.toString(), resolvedTier, ownerAddress, name, String(tier).toUpperCase(), asset.licenseTermsId?.toString() ?? "0");
     } catch { /* ignore duplicate */ }
 
     // Store AES key so vault access can decrypt without CDR read permission
