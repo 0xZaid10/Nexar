@@ -75,11 +75,15 @@ export function encodeInferenceTokenIds(licenseTokenIds: bigint[]): `0x${string}
  * From sdk-reference/cdr/uploader.md allocate() example.
  */
 export function ownerOnly(params: OwnerOnlyParams): BuiltCondition {
+  const writeConditionData = encodeAbiParameters(
+    [{ type: "address" }],
+    [params.ownerAddress]
+  );
   return {
-    writeConditionAddr: params.ownerAddress,
-    readConditionAddr:  params.ownerAddress,
-    writeConditionData: "0x",
-    readConditionData:  "0x",
+    writeConditionAddr: CDR_CONTRACTS.OwnerWriteCondition,
+    readConditionAddr:  CDR_CONTRACTS.OwnerWriteCondition,
+    writeConditionData,
+    readConditionData:  writeConditionData,
     accessAuxData:      "0x",
   };
 }
@@ -145,7 +149,7 @@ export function inferenceOnly(params: InferenceOnlyParams): BuiltCondition {
   );
 
   return {
-    writeConditionAddr: NEXAR_CONTRACTS.InferenceAccessCondition,
+    writeConditionAddr: CDR_CONTRACTS.OwnerWriteCondition,
     readConditionAddr:  NEXAR_CONTRACTS.InferenceAccessCondition,
     writeConditionData,
     readConditionData,
@@ -172,12 +176,9 @@ export function timed(params: TimedParams): BuiltCondition & { expiryTimestamp: 
     [STORY_CONTRACTS.LicenseToken, params.ipId, params.expiryTimestamp]
   );
 
-  const conditionAddr = (NEXAR_CONTRACTS.TimedAccessCondition ||
-    CDR_CONTRACTS.LicenseReadCondition) as `0x${string}`;
-
   return {
-    writeConditionAddr: conditionAddr,
-    readConditionAddr:  conditionAddr,
+    writeConditionAddr: CDR_CONTRACTS.OwnerWriteCondition,
+    readConditionAddr:  CDR_CONTRACTS.OwnerWriteCondition,
     writeConditionData,
     readConditionData,
     accessAuxData:      "0x",

@@ -5,7 +5,7 @@
 // Security model: Pinata holds ciphertext (useless without key), CDR holds key.
 
 import { CID }          from "multiformats/cid";
-import { CipherError }  from "../../core/errors.js";
+import { NexarError as CipherError }  from "../../core/errors.js";
 import { createLogger } from "../../core/logger.js";
 
 const log = createLogger("StorageProvider");

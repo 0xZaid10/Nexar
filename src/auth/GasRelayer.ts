@@ -1,18 +1,18 @@
 // src/auth/GasRelayer.ts
-// Production gas relayer with dedicated EOA and persistent spend tracking.
-// Uses RELAYER_PRIVATE_KEY (separate from deployer PRIVATE_KEY).
+// Production gas relayer — uses dedicated RELAYER_PRIVATE_KEY EOA.
+// Separate from the operator PRIVATE_KEY so spend is isolated and trackable.
 // Spend records persisted in SQLite — survive restarts.
 
-import { createWalletClient, createPublicClient, http } from "viem";
-import { privateKeyToAccount }   from "viem/accounts";
-import type { CDRClient }         from "@piplabs/cdr-sdk";
+import { createPublicClient, createWalletClient, http } from "viem";
+import { privateKeyToAccount }    from "viem/accounts";
+import { CDRClient, initWasm }    from "@piplabs/cdr-sdk";
 
-import { NETWORK, CDR_TIMEOUT_MS } from "../core/config.js";
-import { NexarError as CipherError }             from "../core/errors.js";
-import { createLogger }            from "../core/logger.js";
-import { getDB }                   from "../db/index.js";
-import { SessionManager }          from "./SessionManager.js";
-import { encodeLicenseTokenIds }   from "../sdk/vault/ConditionBuilder.js";
+import { NETWORK, CDR_API_URL, CDR_TIMEOUT_MS } from "../core/config.js";
+import { NexarError as CipherError }            from "../core/errors.js";
+import { createLogger }                         from "../core/logger.js";
+import { getDB }                                from "../db/index.js";
+import { SessionManager }                       from "./SessionManager.js";
+import { encodeLicenseTokenIds }                from "../sdk/vault/ConditionBuilder.js";
 import type { HexAddress, TxHash, VaultAccessResult } from "../core/types.js";
 
 const log = createLogger("GasRelayer");
@@ -20,63 +20,95 @@ const log = createLogger("GasRelayer");
 const MAX_READS_PER_USER = Number(process.env.RELAYER_MAX_READS_PER_USER ?? 100);
 const MAX_TOTAL_READS    = Number(process.env.RELAYER_MAX_TOTAL_READS    ?? 50_000);
 
+// ─── Relayer CDR client singleton ────────────────────────────────────────────
+
+let _relayerCDR: CDRClient | null = null;
+
+async function getRelayerCDR(): Promise<CDRClient> {
+  if (_relayerCDR) return _relayerCDR;
+
+  const relayerKey = process.env.RELAYER_PRIVATE_KEY ?? process.env.PRIVATE_KEY;
+  if (!relayerKey) throw new CipherError("MISSING_ENV", "RELAYER_PRIVATE_KEY not set");
+
+  if (!process.env.RELAYER_PRIVATE_KEY) {
+    log.warn("RELAYER_PRIVATE_KEY not set — falling back to PRIVATE_KEY. Set a dedicated relayer key in production.");
+  }
+
+  await initWasm();
+
+  const pk           = relayerKey.replace(/^0x/, "") as `0x${string}`;
+  const account      = privateKeyToAccount(`0x${pk}`);
+  const publicClient = createPublicClient({ transport: http(NETWORK.rpc) });
+  const walletClient = createWalletClient({ account, transport: http(NETWORK.rpc) });
+
+  _relayerCDR = new CDRClient({
+    network: "testnet",
+    publicClient,
+    walletClient,
+    apiUrl:  CDR_API_URL,
+  });
+
+  log.success("Relayer CDR client initialized", { address: account.address });
+  return _relayerCDR;
+}
+
+// ─── GasRelayer ───────────────────────────────────────────────────────────────
+
 export class GasRelayer {
-  private readonly cdr:            CDRClient;
   private readonly sessionManager: SessionManager;
 
-  constructor(cdrClient: CDRClient, sessionManager: SessionManager) {
-    this.cdr            = cdrClient;
+  constructor(sessionManager: SessionManager) {
     this.sessionManager = sessionManager;
-
-    // Validate relayer key at construction
-    if (!process.env.RELAYER_PRIVATE_KEY && !process.env.PRIVATE_KEY) {
-      log.warn("No RELAYER_PRIVATE_KEY set — falling back to PRIVATE_KEY. Use a dedicated relayer in production.");
-    }
   }
 
   /**
-   * Sponsor a CDR vault read for a user identified by session token.
-   * Relayer pays gas. User pays nothing.
+   * Sponsor a CDR vault read using the dedicated relayer wallet.
+   * User pays zero gas — relayer EOA covers it.
    */
-  async sponsorRead(sessionToken: string, licenseTokenIds: bigint[] = []): Promise<VaultAccessResult> {
+  async sponsorRead(
+    sessionToken:    string,
+    licenseTokenIds: bigint[] = []
+  ): Promise<VaultAccessResult> {
     const session = this.sessionManager.verifySession(sessionToken);
     if (!session.vaultUuid) throw new CipherError("GAS_RELAY_FAILED", "Session has no vaultUuid");
 
     const userAddress = session.address;
     const uuid        = session.vaultUuid;
 
-    log.info("Sponsoring CDR read...", { user: userAddress, uuid: uuid.toString(), role: session.role });
+    log.info("Sponsoring CDR read...", { user: userAddress, uuid: uuid.toString() });
 
-    // Check per-user + global limits
     this.checkLimits(userAddress);
 
+    const cdr           = await getRelayerCDR();
     const accessAuxData = licenseTokenIds.length > 0
       ? encodeLicenseTokenIds(licenseTokenIds)
       : "0x";
 
     try {
-      const result = await this.cdr.consumer.accessCDR({
+      const result = await cdr.consumer.accessCDR({
         uuid:          Number(uuid),
         accessAuxData,
         timeoutMs:     CDR_TIMEOUT_MS,
       });
 
-      // Persist spend record
       this.recordRead(userAddress);
 
-      log.success("Sponsored read complete", {
-        user:   userAddress,
-        uuid:   uuid.toString(),
-        txHash: result.txHash,
-      });
+      log.success("Sponsored read complete", { user: userAddress, uuid: uuid.toString(), txHash: result.txHash });
 
       return { dataKey: result.dataKey, txHash: result.txHash as TxHash };
     } catch (err) {
       const name = (err as Error)?.name ?? "";
-      if (name === "EmptyVaultError")                throw new CipherError("VAULT_EMPTY",   `Vault ${uuid} is empty`);
-      if (name === "PartialCollectionTimeoutError")  throw new CipherError("VAULT_TIMEOUT", `Vault ${uuid} timed out`);
+      if (name === "EmptyVaultError")               throw new CipherError("VAULT_EMPTY",   `Vault ${uuid} is empty`);
+      if (name === "PartialCollectionTimeoutError") throw new CipherError("VAULT_TIMEOUT", `Vault ${uuid} timed out`);
       throw new CipherError("GAS_RELAY_FAILED", `Sponsored read failed for vault ${uuid}`, { cause: err });
     }
+  }
+
+  getRelayerAddress(): string {
+    const key = process.env.RELAYER_PRIVATE_KEY ?? process.env.PRIVATE_KEY ?? "";
+    try {
+      return privateKeyToAccount(`0x${key.replace(/^0x/, "")}` as `0x${string}`).address;
+    } catch { return "unknown"; }
   }
 
   getUserStats(address: HexAddress): { totalReads: number; lastRead: number } | null {

@@ -8,7 +8,4 @@ typechain-types/
 demo/
 *.db-shm
 *.db-wal
-hardhat.config.cjs
-hardhat.config.ts
-tsconfig.json
-vitest.config.ts
+scripts

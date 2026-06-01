@@ -5,7 +5,7 @@
 import type { StoryClient } from "@story-protocol/core-sdk";
 import { zeroAddress }       from "viem";
 
-import { STORY_CONTRACTS, NEXAR_CONTRACTS } from "../core/config.js";
+import { STORY_CONTRACTS, NEXAR_CONTRACTS, TOKENS } from "../core/config.js";
 import { NexarError }                       from "../core/errors.js";
 import { createLogger }                      from "../core/logger.js";
 import type { HexAddress, TxHash, LicenseRecord, PILConfig } from "../core/types.js";
@@ -160,7 +160,7 @@ export class LicensingEngine {
   }): Promise<{ licenseTokenIds: bigint[]; txHash: TxHash }> {
     log.info("Minting license tokens...", {
       licensorIpId:   params.licensorIpId,
-      licenseTermsId: params.licenseTermsId.toString(),
+      licenseTermsId: Number(params.licenseTermsId),
       receiver:       params.receiver,
       amount:         (params.amount ?? 1).toString(),
     });
@@ -184,15 +184,99 @@ export class LicensingEngine {
         txHash:          response.txHash as TxHash,
       };
     } catch (err) {
-      throw new NexarError(
-        "LICENSE_MINT_FAILED",
-        `Failed to mint license for ${params.licensorIpId}`,
-        { cause: err }
-      );
+      const msg = (err as Error)?.message ?? String(err); console.error("[LicenseEngine DEBUG]", msg); throw new NexarError("LICENSE_MINT_FAILED", `Failed to mint license for ${params.licensorIpId}: ${msg.slice(0,200)}`, { cause: err });
     }
   }
 
   // ─── Read terms ───────────────────────────────────────────────────────────
+
+  /**
+   * Mint license tokens WITH WIP payment.
+   * Handles: check balance → approve LicensingModule → mint.
+   * Used when the buyer is a different wallet from the licensor
+   * (real multi-user transactions).
+   *
+   * @param buyerWalletClient - The buyer's viem WalletClient (from getUserClients)
+   * @param buyerPublicClient - The buyer's viem PublicClient
+   * @param mintingFee        - Amount to pay in WIP (wei, as bigint)
+   */
+  async mintWithPayment(params: {
+    licensorIpId:     HexAddress;
+    licenseTermsId:   bigint;
+    receiver:         HexAddress;
+    amount?:          number;
+    mintingFee:       bigint;
+    buyerWalletClient: ReturnType<typeof import("viem").createWalletClient>;
+    buyerPublicClient: ReturnType<typeof import("viem").createPublicClient>;
+  }): Promise<{ licenseTokenIds: bigint[]; txHash: TxHash }> {
+    const { mintingFee, buyerWalletClient, buyerPublicClient } = params;
+
+    const ERC20_ABI = [
+      { name: "balanceOf", type: "function", stateMutability: "view",
+        inputs: [{ name: "account", type: "address" }], outputs: [{ type: "uint256" }] },
+      { name: "approve",   type: "function", stateMutability: "nonpayable",
+        inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
+        outputs: [{ type: "bool" }] },
+      { name: "allowance", type: "function", stateMutability: "view",
+        inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }],
+        outputs: [{ type: "uint256" }] },
+    ] as const;
+
+    const buyerAddr      = (await buyerWalletClient.getAddresses())[0]!;
+    const licensingModule = STORY_CONTRACTS.LicensingModule as HexAddress;
+
+    if (mintingFee > 0n) {
+      // 1. Check WIP balance
+      const balance = await buyerPublicClient.readContract({
+        address:      TOKENS.WIP,
+        abi:          ERC20_ABI,
+        functionName: "balanceOf",
+        args:         [buyerAddr],
+      });
+
+      if ((balance as bigint) < mintingFee) {
+        throw new NexarError(
+          "INSUFFICIENT_BALANCE",
+          `Buyer has ${balance} WIP but needs ${mintingFee} WIP to mint this license`
+        );
+      }
+
+      // 2. Check existing allowance
+      const allowance = await buyerPublicClient.readContract({
+        address:      TOKENS.WIP,
+        abi:          ERC20_ABI,
+        functionName: "allowance",
+        args:         [buyerAddr, licensingModule],
+      });
+
+      // 3. Approve if needed
+      if ((allowance as bigint) < mintingFee) {
+        log.info("Approving WIP spend for LicensingModule...", {
+          amount: mintingFee.toString(),
+          buyer:  buyerAddr,
+        });
+
+        await buyerWalletClient.writeContract({
+          address:      TOKENS.WIP,
+          abi:          ERC20_ABI,
+          functionName: "approve",
+          args:         [licensingModule, mintingFee],
+          chain:        null,
+          account:      buyerAddr,
+        });
+
+        log.success("WIP approval confirmed");
+      }
+    }
+
+    // 4. Mint using buyer's Story client
+    return this.mintLicenseTokens({
+      licensorIpId:   params.licensorIpId,
+      licenseTermsId: params.licenseTermsId,
+      receiver:       params.receiver,
+      amount:         params.amount ?? 1,
+    });
+  }
 
   /**
    * Get license terms by ID.

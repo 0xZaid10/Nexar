@@ -28,7 +28,7 @@ import {
 import { VaultManager }     from "../vault/VaultManager.js";
 import { MetadataBuilder }  from "./MetadataBuilder.js";
 import { getAssetTypeConfig, isFileVault } from "./AssetTypes.js";
-import { licenseGated, inferenceOnly }     from "../vault/ConditionBuilder.js";
+import { licenseGated, inferenceOnly, ownerOnly } from "../vault/ConditionBuilder.js";
 import { sha256Hex }                       from "../vault/Encryptor.js";
 
 const log = createLogger("AssetRegistry");
@@ -39,17 +39,20 @@ export class AssetRegistry {
   private readonly story:    ReturnType<typeof StoryClient.newClient>;
   private readonly vaults:   VaultManager;
   private readonly metadata: MetadataBuilder;
-  private readonly ownerAddress: HexAddress;
+  private readonly ownerAddress:  HexAddress;  // IP owner (user's Privy wallet)
+  private readonly signerAddress: HexAddress;  // Transaction signer (operator pays gas)
 
   constructor(
-    storyClient: ReturnType<typeof StoryClient.newClient>,
-    cdrClient:   CDRClient,
-    ownerAddress: HexAddress
+    storyClient:    ReturnType<typeof StoryClient.newClient>,
+    cdrClient:      CDRClient,
+    ownerAddress:   HexAddress,
+    signerAddress?: HexAddress   // defaults to ownerAddress if not provided
   ) {
-    this.story        = storyClient;
-    this.vaults       = new VaultManager(cdrClient);
-    this.metadata     = new MetadataBuilder();
-    this.ownerAddress = ownerAddress;
+    this.story         = storyClient;
+    this.vaults        = new VaultManager(cdrClient);
+    this.metadata      = new MetadataBuilder();
+    this.ownerAddress  = ownerAddress;
+    this.signerAddress = signerAddress ?? ownerAddress;
   }
 
   /**
@@ -92,7 +95,7 @@ export class AssetRegistry {
     log.info("Step 2/5: Minting NFT + registering IP Asset...");
 
     const mintingFee  = parseEther(params.basePrice);
-    const revSharePct = Math.round(params.revShare * 1_000_000); // convert % to Story units
+    const revSharePct = params.revShare; // Story SDK expects plain 0-100 percentage
 
     const ipResponse = await this.story.ipAsset.registerIpAsset({
       nft: {
@@ -104,29 +107,29 @@ export class AssetRegistry {
         {
           terms: {
             transferable:              config.defaultPIL.transferable,
-            royaltyPolicy:             STORY_CONTRACTS.RoyaltyPolicyLAP,
+            royaltyPolicy:             params.commercial ? STORY_CONTRACTS.RoyaltyPolicyLAP as HexAddress : zeroAddress,
             defaultMintingFee:         mintingFee,
             expiration:                0n,
             commercialUse:             params.commercial,
-            commercialAttribution:     true,
+            commercialAttribution:     params.commercial,     // must match commercialUse
             commercializerChecker:     zeroAddress,
             commercializerCheckerData: "0x",
             commercialRevShare:        revSharePct,
             commercialRevCeiling:      0n,
             derivativesAllowed:        config.defaultPIL.derivativesAllowed,
-            derivativesAttribution:    true,
+            derivativesAttribution:    config.defaultPIL.derivativesAllowed, // must match derivativesAllowed
             derivativesApproval:       false,
-            derivativesReciprocal:     config.defaultPIL.derivativesReciprocal,
+            derivativesReciprocal:     config.defaultPIL.derivativesAllowed ? config.defaultPIL.derivativesReciprocal : false,
             derivativeRevCeiling:      0n,
             currency:                  TOKENS.WIP,
             uri:                       "",
           },
           licensingConfig: {
-            isSet:              true,
+            isSet:              false,   // disabled — hook not registered yet for this IP
             mintingFee:         mintingFee,
-            licensingHook:      NEXAR_CONTRACTS.DynamicPricingHook,
+            licensingHook:      zeroAddress,  // no hook — prevents revert on unregistered assets
             hookData:           "0x",
-            commercialRevShare: revSharePct,
+            commercialRevShare: params.commercial ? revSharePct : 0,
             disabled:           false,
             expectMinimumGroupRewardShare: 0,
             expectGroupRewardPool:         zeroAddress,
@@ -164,11 +167,12 @@ export class AssetRegistry {
     log.info("Step 4/5: Creating CDR vault...");
 
     let vaultUuid: bigint;
+    let lastVaultRecord: any;
 
     if (params.tier === AssetTier.INFERENCE) {
       // Use InferenceAccessCondition for inference vaults
       const condition = inferenceOnly({
-        ownerAddress:             this.ownerAddress,
+        ownerAddress:             this.signerAddress,  // signer pays gas and writes vault
         ipId,
         inferenceLicenseTermsId:  licenseTermsId,
         maxComputeUnits:          config.maxComputeUnits,
@@ -179,7 +183,7 @@ export class AssetRegistry {
             content:       params.content,
             conditionType: "inferenceOnly",
             conditionData: {
-              ownerAddress:             this.ownerAddress,
+              ownerAddress:             this.signerAddress,
               ipId,
               inferenceLicenseTermsId:  licenseTermsId,
               maxComputeUnits:          config.maxComputeUnits,
@@ -193,7 +197,7 @@ export class AssetRegistry {
             content:       params.content,
             conditionType: "inferenceOnly",
             conditionData: {
-              ownerAddress:             this.ownerAddress,
+              ownerAddress:             this.signerAddress,
               ipId,
               inferenceLicenseTermsId:  licenseTermsId,
               maxComputeUnits:          config.maxComputeUnits,
@@ -204,6 +208,7 @@ export class AssetRegistry {
             updatable: false,
           });
 
+      lastVaultRecord = vaultRecord;
       vaultUuid = vaultRecord.uuid;
     } else {
       // Use standard LicenseReadCondition for all other tiers
@@ -217,11 +222,7 @@ export class AssetRegistry {
             content:       params.content,
             conditionType: "licenseGated",
             conditionData: {
-              ownerAddress:       this.ownerAddress,
-              ipId,
-              customConditionAddr: undefined,
-              customWriteData:    condition.writeConditionData,
-              customReadData:     condition.readConditionData,
+              ownerAddress: this.signerAddress,
             },
             updatable: false,
           })
@@ -229,15 +230,12 @@ export class AssetRegistry {
             content:       params.content,
             conditionType: "licenseGated",
             conditionData: {
-              ownerAddress:       this.ownerAddress,
-              ipId,
-              customConditionAddr: undefined,
-              customWriteData:    condition.writeConditionData,
-              customReadData:     condition.readConditionData,
+              ownerAddress: this.signerAddress,
             },
             updatable: false,
           });
 
+      lastVaultRecord = vaultRecord;
       vaultUuid = vaultRecord.uuid;
     }
 
@@ -272,7 +270,7 @@ export class AssetRegistry {
       tier:      config.label,
     });
 
-    return result;
+    return { ...result, vaultAesKey: lastVaultRecord?.aesKey, vaultCid: lastVaultRecord?.cid };
   }
 
   // ─── Create SPG NFT collection (run once during setup) ────────────────────

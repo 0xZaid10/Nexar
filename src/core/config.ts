@@ -131,6 +131,7 @@ export const SESSION_TTL = {
 // ─── CDR timeouts ─────────────────────────────────────────────────────────────
 
 export const CDR_TIMEOUT_MS = 120_000; // 2 minutes — recommended by docs
+export const CDR_API_URL = process.env.CDR_API_URL || "http://172.192.41.96:1317";
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────
 

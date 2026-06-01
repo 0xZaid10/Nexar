@@ -22,7 +22,7 @@ import {
 } from "../../core/index.js";
 
 import { getCDRStorageProvider }      from "./StorageProvider.js";
-import { encodeLicenseTokenIds }      from "./ConditionBuilder.js";
+import { encodeLicenseTokenIds, ownerOnly, licenseGated } from "./ConditionBuilder.js";
 
 const log = createLogger("VaultManager");
 
@@ -64,7 +64,8 @@ export class VaultManager {
     try {
       const globalPubKey = await this.cdr.observer.getGlobalPubKey();
 
-      const result = await this.cdr.uploader.uploadCDR({
+      console.log("[uploadCDR DEBUG] writeAddr:", writeConditionAddr, "readAddr:", readConditionAddr);
+    const result = await this.cdr.uploader.uploadCDR({
         dataKey:            params.content,
         globalPubKey,
         updatable:          params.updatable,
@@ -135,8 +136,14 @@ export class VaultManager {
 
       const { writeConditionAddr, readConditionAddr, writeConditionData, readConditionData } =
         this.buildConditionArgs(params);
+      // CRITICAL: if ownerAddress in conditionData differs from signer, fix writeConditionData
+      const _co = (params as any).conditionOverride;
+      const _wca  = _co?.writeConditionAddr  ?? writeConditionAddr;
+      const _rca  = _co?.readConditionAddr   ?? readConditionAddr;
+      const _wcd  = _co?.writeConditionData  ?? writeConditionData;
+      const _rcd  = _co?.readConditionData   ?? readConditionData;
+      console.log("[vault] wca:", _wca, "wcd:", _wcd?.slice(0,20));
       const globalPubKey = await this.cdr.observer.getGlobalPubKey();
-
       const result = await this.cdr.uploader.uploadCDR({
         dataKey:            payload,
         globalPubKey,
@@ -153,6 +160,7 @@ export class VaultManager {
         conditionType: params.conditionData as unknown as VaultRecord["conditionType"],
         cid,
         createdAt:     Date.now(),
+        aesKey:        key,
         txHashes: {
           allocate: result.txHashes?.allocate as TxHash ?? "0x",
           write:    result.txHashes?.write    as TxHash ?? "0x",
@@ -167,7 +175,7 @@ export class VaultManager {
       return record;
     } catch (err) {
       if (err instanceof NexarError) throw err;
-      throw new NexarError("VAULT_CREATE_FAILED", "File vault creation failed", { cause: err });
+ throw new NexarError("VAULT_CREATE_FAILED", "File vault creation failed: " + String(err?.message ?? err), { cause: err });
     }
   }
 
@@ -298,12 +306,12 @@ export class VaultManager {
     readConditionData:  `0x${string}`;
   } {
     const d = params.conditionData;
-    return {
-      writeConditionAddr: d.customConditionAddr ?? d.ownerAddress as HexAddress,
-      readConditionAddr:  d.customConditionAddr ?? d.ipId as HexAddress ?? d.ownerAddress as HexAddress,
-      writeConditionData: d.customWriteData ?? "0x",
-      readConditionData:  d.customReadData  ?? "0x",
-    };
+    if (d.ipId) {
+      const cond = licenseGated({ ownerAddress: d.ownerAddress as HexAddress, ipId: d.ipId as HexAddress });
+      return { writeConditionAddr: cond.writeConditionAddr, readConditionAddr: cond.readConditionAddr, writeConditionData: cond.writeConditionData, readConditionData: cond.readConditionData };
+    }
+    const cond = ownerOnly({ ownerAddress: d.ownerAddress as HexAddress });
+    return { writeConditionAddr: cond.writeConditionAddr, readConditionAddr: cond.readConditionAddr, writeConditionData: cond.writeConditionData, readConditionData: cond.readConditionData };
   }
 
   private buildAccessAuxData(params: VaultAccessParams): `0x${string}` {

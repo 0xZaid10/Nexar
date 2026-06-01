@@ -5,9 +5,7 @@
 //                    developers/cdr-sdk/setup.md
 
 import { StoryClient, type StoryConfig } from "@story-protocol/core-sdk";
-import { CDRClient, initWasm, HeliaProvider } from "@piplabs/cdr-sdk";
-import { createHelia } from "helia";
-import { unixfs } from "@helia/unixfs";
+import { CDRClient, initWasm } from "@piplabs/cdr-sdk";
 import {
   createPublicClient,
   createWalletClient,
@@ -118,21 +116,6 @@ export function createCDRClient(
   }
 }
 
-// ─── Helia (IPFS) storage provider ───────────────────────────────────────────
-
-/**
- * Initialize Helia in-process IPFS node and return a HeliaProvider.
- * HeliaProvider is the only fully tested storage backend on Aeneid.
- * Confirmed from sdk-reference/cdr/uploader.md + developers/cdr-sdk/overview.md.
- */
-export async function createHeliaProvider(): Promise<HeliaProvider> {
-  log.debug("Initializing Helia IPFS node...");
-  const helia   = await createHelia();
-  const ufs     = unixfs(helia);
-  const provider = new HeliaProvider({ helia, unixfs: ufs });
-  log.debug("Helia provider ready");
-  return provider;
-}
 
 // ─── Full client bundle ───────────────────────────────────────────────────────
 
@@ -142,7 +125,6 @@ export interface ClientBundle {
   walletClient:  WalletClient;
   storyClient:   ReturnType<typeof StoryClient.newClient>;
   cdrClient:     CDRClient;
-  heliaProvider: HeliaProvider;
 }
 
 /**
@@ -167,7 +149,6 @@ export async function initClients(
   const walletClient  = createViemWalletClient(account, rpcUrl);
   const storyClient   = createStoryClient(account);
   const cdrClient     = createCDRClient(publicClient, walletClient, apiUrl);
-  const heliaProvider = await createHeliaProvider();
 
   log.success("All clients initialized", { address: account.address });
 
@@ -177,6 +158,5 @@ export async function initClients(
     walletClient,
     storyClient,
     cdrClient,
-    heliaProvider,
   };
 }
