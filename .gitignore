@@ -14,3 +14,7 @@ nexar-test.db
 nexar.db
 test
 public
+*:Zone.Identifier
+*Zone.Identifier
+*.db
+*.db.bak
