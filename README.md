@@ -1,4 +1,4 @@
-# ⬡ NEXAR — Private Intelligence Graph
+# NEXAR — Private Intelligence Graph
 
 > Register any file as on-chain intellectual property. Sell access cryptographically. Earn royalties automatically. All through Telegram.
 
