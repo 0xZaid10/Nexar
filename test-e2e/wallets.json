@@ -1,0 +1,22 @@
+[
+  {
+    "name": "alice",
+    "privateKey": "0xb3076f9dc1462cb0fa9c31004349221a232dffc67bb25e8c6bedfd7d303b11e2",
+    "address": "0x50e27408619F9573a8BFb1765a9B3c62bE979d82"
+  },
+  {
+    "name": "bob",
+    "privateKey": "0xbd4ac74610e0f3bef69d4cd76ab91a6401332e0d1357dd4b29217197a0bb075d",
+    "address": "0xb2941a76F53acD6f7d39DB967D51076A94e1f198"
+  },
+  {
+    "name": "charlie",
+    "privateKey": "0xe44dc518d51e5145cb9635dc3ca0c63600f34599c9148a72ede75a0a1e80e00e",
+    "address": "0x46404e84e4aa8cE55f2e3f90f104aE8e1eC17C44"
+  },
+  {
+    "name": "dave",
+    "privateKey": "0x0dc990cefeb6890c79f9cce800df20e329be7e6e5b756c641d40df387eb9def2",
+    "address": "0x2e8fF602CA7D261533B327bd3B4A4A155e9781C1"
+  }
+]

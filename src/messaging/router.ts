@@ -140,9 +140,34 @@ export async function routeMessage(msg: ParsedMessage, depsOrSend: RouterDeps | 
       }
     }
 
+    const APP_URL = process.env.NEXAR_APP_URL ?? "https://nexarip.online";
     // ── New user ──────────────────────────────────────────────────────────
     if (!username) {
-      await send(intent === "help" ? welcomeMessage(platform) : notRegisteredMessage(platform));
+      await send([
+        "👋 Welcome to NEXAR — Private Intelligence Graph",
+        "",
+        "To get started, open the NEXAR app:",
+        `${APP_URL}/app`,
+        "",
+        "Sign in with email or Google — no wallet needed.",
+      ].join("\n"));
+      return;
+    }
+
+    // Wallet check — user needs a wallet for sensitive commands
+    // Server wallet handles all signing — no delegation needed
+    const { WalletManager } = await import("../auth/WalletManager.js");
+    const wm = new WalletManager();
+    const sensitiveIntents = ["buy","access","file_received","claim"];
+    if (sensitiveIntents.includes(intent) && !wm.hasWallet(username)) {
+      await send([
+        `⚠️ Wallet setup required.`,
+        "",
+        "Open the NEXAR app to set up your wallet:",
+        `${APP_URL}/app`,
+        "",
+        "Takes 30 seconds. Only needed once.",
+      ].join("\n"));
       return;
     }
 

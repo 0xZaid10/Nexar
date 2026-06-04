@@ -66,7 +66,7 @@ export async function handleAccessAsset(
 
     // 3. Check license — find token ID held by buyer
     let license = db.prepare(
-      "SELECT license_token_id FROM licenses WHERE licensor_ip_id = ? AND holder_address = ? LIMIT 1"
+      "SELECT license_token_id FROM licenses WHERE LOWER(licensor_ip_id) = LOWER(?) AND LOWER(holder_address) = LOWER(?) LIMIT 1"
     ).get(asset.ip_id, buyerAddress) as { license_token_id: string } | undefined;
 
     // Owner always has access to their own assets
@@ -77,9 +77,11 @@ export async function handleAccessAsset(
       return;
     }
 
-    // If owner accessing their own asset, use a synthetic token ID
+    // Owner should have a license from registration (auto-minted)
+    // If not found, deny — they can re-register or use the bot to fix
     if (!license && isOwner) {
-      (license as any) = { license_token_id: "owner" };
+      await send(`❌ No license found for your own asset. This may be a registration issue.`);
+      return;
     }
 
     const tokenId = license.license_token_id;

@@ -223,6 +223,7 @@ export class AssetRegistry {
             conditionType: "licenseGated",
             conditionData: {
               ownerAddress: this.signerAddress,
+              ipId,
             },
             updatable: false,
           })
@@ -231,6 +232,7 @@ export class AssetRegistry {
             conditionType: "licenseGated",
             conditionData: {
               ownerAddress: this.signerAddress,
+              ipId,
             },
             updatable: false,
           });

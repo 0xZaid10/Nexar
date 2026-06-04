@@ -61,20 +61,40 @@ async function createPrivyWallet(): Promise<{ id: string; address: string }> {
 
 // ─── Privy signing ────────────────────────────────────────────────────────────
 
+// Lazy-loaded Privy server client
+let _privyClient: any = null;
+function getPrivyClient() {
+  if (_privyClient) return _privyClient;
+  const { PrivyClient } = require("@privy-io/server-auth");
+  _privyClient = new PrivyClient(
+    process.env.PRIVY_APP_ID!,
+    process.env.PRIVY_APP_SECRET!,
+  );
+  return _privyClient;
+}
+
 async function privyRPC(walletId: string, method: string, params: unknown): Promise<string> {
+  // caip2 must be at ROOT level of request body, not inside params
+  const p = params as any;
+  const caip2 = p?.caip2 ?? (method === "eth_sendTransaction" ? "eip155:1315" : undefined);
+  const cleanParams = (caip2 && p?.caip2)
+    ? (({ caip2: _, ...rest }) => rest)(p)
+    : params;
+
+  const body: Record<string, unknown> = { method, params: cleanParams };
+  if (caip2) body.caip2 = caip2;
+
   const res = await fetch(`${PRIVY_BASE}/wallets/${walletId}/rpc`, {
     method:  "POST",
     headers: privyHeaders(),
-    body:    JSON.stringify({ method, params }),
+    body:    JSON.stringify(body),
   });
-
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Privy RPC ${method} failed ${res.status}: ${err}`);
+    const errText = await res.text();
+    throw new Error(`Privy RPC ${method} failed ${res.status}: ${errText}`);
   }
-
-  const data = await res.json() as { data?: { signature?: string; signedTransaction?: string } };
-  return data.data?.signature ?? data.data?.signedTransaction ?? "";
+  const data = await res.json() as { data?: { signature?: string; signedTransaction?: string; hash?: string } };
+  return data.data?.hash ?? data.data?.signature ?? data.data?.signedTransaction ?? "";
 }
 
 // ─── Build a viem-compatible Account backed by Privy signing ─────────────────
@@ -93,8 +113,21 @@ function buildPrivyAccount(walletId: string, address: Address): Account {
     },
 
     async signTransaction(tx): Promise<Hex> {
-      const sig = await privyRPC(walletId, "eth_signTransaction", { transaction: tx });
-      return sig as Hex;
+      // Privy server wallets: use eth_sendTransaction (sign + broadcast atomically)
+      // Strip fields Privy doesn't accept in transaction object
+      const { chainId, gas, maxFeePerGas, maxPriorityFeePerGas, nonce, type, ...txFields } = tx as any;
+      const cleanTx: Record<string, unknown> = {};
+      if (txFields.to)    cleanTx.to    = txFields.to;
+      if (txFields.data)  cleanTx.data  = txFields.data;
+      if (txFields.value !== undefined) cleanTx.value = typeof txFields.value === "bigint"
+        ? `0x${txFields.value.toString(16)}` : txFields.value ?? "0x0";
+
+      const hash = await privyRPC(walletId, "eth_sendTransaction", {
+        transaction: cleanTx,
+        caip2: "eip155:1315",
+      });
+      // Return hash — viem's writeContract detects already-broadcast tx
+      return (hash || "0x") as Hex;
     },
 
     async signTypedData(typedData): Promise<Hex> {
@@ -288,6 +321,26 @@ export class WalletManager {
     const row = getDB().prepare("SELECT privy_wallet_id FROM wallets WHERE label = ?").get(label) as
       { privy_wallet_id: string | null } | undefined;
     return !!(row?.privy_wallet_id);
+  }
+
+  /**
+   * Store a user's Privy embedded wallet (from Mini App delegation).
+   * walletId = Privy embedded wallet ID (starts with "did:privy:")
+   * address  = wallet address from Mini App
+   * This replaces any existing wallet for the user.
+   */
+  storeDelegatedWallet(label: string, walletId: string, address: string): void {
+    const db = getDB();
+    const existing = db.prepare("SELECT 1 FROM wallets WHERE label = ?").get(label);
+    if (existing) {
+      db.prepare("UPDATE wallets SET address = ?, privy_wallet_id = ?, encrypted_pk = NULL WHERE label = ?")
+        .run(address, walletId, label);
+      log.info("Updated wallet with delegation", { label, address });
+    } else {
+      db.prepare("INSERT INTO wallets (label, address, privy_wallet_id) VALUES (?, ?, ?)")
+        .run(label, address, walletId);
+      log.info("Stored delegated wallet", { label, address });
+    }
   }
 
   listLabels(): string[] {

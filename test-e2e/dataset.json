@@ -1,0 +1,8 @@
+{
+  "strategy": "mean_reversion_v3",
+  "signals": [0.023, -0.041, 0.018, 0.067, -0.012, 0.034, 0.091],
+  "sharpe": 2.14,
+  "maxDrawdown": -0.08,
+  "backtest": "2020-2024",
+  "CONFIDENTIAL": "DO NOT DISTRIBUTE"
+}

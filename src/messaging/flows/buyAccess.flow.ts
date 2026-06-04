@@ -107,17 +107,6 @@ export async function startBuyFlow(
     }
   }
 
-  if (existingLicense) {
-    await send([
-      `✅ You already own a license for ${asset.name}!`,
-      ``,
-      `License token: #${existingLicense.license_token_id}`,
-      ``,
-      `Access it with: access ${ownerUsername}/${assetSlug}`,
-    ].join("\n"));
-    return;
-  }
-
   const priceEth = asset.price === "0" ? "free" : (Number(asset.price) / 1e18).toFixed(4);
 
   // Store pending purchase in state

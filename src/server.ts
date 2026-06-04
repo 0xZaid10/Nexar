@@ -1,10 +1,9 @@
 // src/server.ts
-// NEXAR HTTP server — Express with separate routers for API, Spectrum, Telegram, and access links.
-
 import "dotenv/config";
 import express              from "express";
 import helmet               from "helmet";
 import cors                 from "cors";
+import { join }             from "path";
 
 import { validateEnv, validateDeployedContracts, NETWORK } from "./core/config.js";
 import { getDB }            from "./db/index.js";
@@ -18,6 +17,7 @@ import { vaultRouter }      from "./routes/vault.js";
 import { licenseRouter }    from "./routes/license.js";
 import { royaltyRouter }    from "./routes/royalty.js";
 import { accessRouter }     from "./routes/access.js";
+import { miniappRouter }    from "./routes/miniapp.js";
 import { spectrumRouter, setSpectrumApp } from "./routes/spectrum.js";
 import { telegramRouter }   from "./routes/telegram.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
@@ -43,8 +43,10 @@ getOperator().catch((err) => {
 
 const app = express();
 
-app.use(helmet());
+app.use(helmet({ contentSecurityPolicy: false }));
+app.set('trust proxy', 1); // trust ngrok/nginx proxy // CSP off — Mini App needs inline scripts
 app.use(cors({ origin: process.env.CORS_ORIGIN ?? "*", methods: ["GET", "POST", "PUT", "DELETE"] }));
+app.use((_req, res, next) => { res.setHeader("ngrok-skip-browser-warning", "true"); next(); });
 
 // ── Raw body for Spectrum webhook MUST come before express.json() ──────────
 app.use(
@@ -63,7 +65,7 @@ app.use((req, _res, next) => {
   next();
 });
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
+// ─── Routes ───────────────────────────────────────────────────────────────────
 
 app.use("/health",              healthRouter);
 app.use("/api/wallet",          walletLimiter,  walletRouter);
@@ -71,8 +73,15 @@ app.use("/api/asset",           assetLimiter,   assetRouter);
 app.use("/api/vault",           apiLimiter,     vaultRouter);
 app.use("/api/license",         apiLimiter,     licenseRouter);
 app.use("/api/royalty",         apiLimiter,     royaltyRouter);
-app.use("/access",              accessRouter);   // public download links — no auth needed
+app.use("/api",                 apiLimiter,     miniappRouter);  // /api/auth/delegate etc
+app.use("/access",              accessRouter);
 app.use("/webhook/telegram",    telegramRouter);
+
+// ── Mini App static files ─────────────────────────────────────────────────────
+// Built by: cd miniapp && npm run build  (outputs to public/app)
+const miniappDir = join(process.cwd(), "public", "app");
+app.use("/app", express.static(miniappDir));
+app.get("/app/*", (_req, res) => res.sendFile(join(miniappDir, "index.html")));
 
 app.use(notFound);
 app.use(errorHandler);
@@ -104,6 +113,8 @@ app.listen(PORT, () => {
     license:  "POST /api/license/mint",
     royalty:  "GET  /api/royalty/:ipId/claimable",
     access:   "GET  /access/:token",
+    delegate: "POST /api/auth/delegate",
+    miniapp:  "GET  /app",
     spectrum: "POST /webhook/spectrum",
     telegram: "POST /webhook/telegram",
   });
@@ -115,7 +126,8 @@ app.listen(PORT, () => {
     hf:       process.env.HF_API_TOKEN        ? "✓ real inference" : "⚠ simulation",
     spectrum: process.env.SPECTRUM_PROJECT_ID ? "✓ connected"      : "⚠ dev mode",
     telegram: process.env.TELEGRAM_BOT_TOKEN  ? "✓ connected"      : "⚠ not configured",
-    appUrl:   process.env.NEXAR_APP_URL       ?? "https://nexar.io",
+    appUrl:   process.env.NEXAR_APP_URL       ?? "https://nexarip.online",
+    miniapp:  "GET /app",
   });
 
   initSpectrum();

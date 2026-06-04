@@ -99,16 +99,7 @@ assetRouter.post(
       ).run(asset.ipId, asset.vaultUuid.toString(), resolvedTier, ownerAddress, name, String(tier).toUpperCase(), asset.licenseTermsId?.toString() ?? "0");
     } catch { /* ignore duplicate */ }
 
-    // Store AES key so vault access can decrypt without CDR read permission
-    if ((asset as any).vaultAesKey) {
-      try {
-        db.prepare("INSERT OR REPLACE INTO vault_secrets (vault_uuid, cid, aes_key) VALUES (?,?,?)").run(
-          asset.vaultUuid.toString(),
-          (asset as any).vaultCid ?? "",
-          Buffer.from((asset as any).vaultAesKey)
-        );
-      } catch { /* ignore */ }
-    }
+    // CDR holds the AES key via LicenseReadCondition — no server-side key storage needed
 
     res.status(201).json({
       ok:        true,

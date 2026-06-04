@@ -272,6 +272,28 @@ async function finalizeRegistration(params: {
     }
 
     const accessLabel = accessType === "anyone" ? "Anyone who pays" : "Anyone";
+
+    // Auto-mint a license to the owner so they can CDR-read their own files
+    try {
+      const assetRow = await fetch(`${BASE_URL}/api/asset/${data.ipId}`).then(r => r.json()) as any;
+      const licenseTermsId = assetRow?.licenseTermsId ?? "0";
+      if (licenseTermsId !== "0") {
+        await fetch(`${BASE_URL}/api/license/mint`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            licensorIpId:    data.ipId,
+            licenseTermsId,
+            buyerLabel:      username,   // owner gets a license to their own asset
+            mintingFee:      "0",        // free for owner
+          }),
+        });
+        log.info("Owner license minted", { username, ipId: data.ipId });
+      }
+    } catch (e) {
+      log.warn("Owner license mint failed (non-critical)", { username });
+    }
+
     await send(assetRegisteredMessage(assetName, data.ipId, price, accessLabel, platform));
 
   } catch (err) {

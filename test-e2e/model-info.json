@@ -1,0 +1,7 @@
+{
+  "modelId": "HuggingFaceH4/zephyr-7b-beta",
+  "description": "Financial analysis assistant — inference access only",
+  "systemPrompt": "You are a financial analysis AI. Analyze markets with momentum and mean-reversion strategies. Output format: {signal: buy|sell|hold, confidence: 0-1, reasoning: string}",
+  "maxTokens": 256,
+  "CONFIDENTIAL": "MODEL CONTEXT — DO NOT DISTRIBUTE"
+}

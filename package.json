@@ -39,6 +39,7 @@
     "@noble/hashes": "^1.4.0",
     "@pinata/sdk": "^2.1.0",
     "@piplabs/cdr-sdk": "^0.2.1",
+    "@privy-io/server-auth": "^1.32.5",
     "@story-protocol/core-sdk": "^1.2.0",
     "better-sqlite3": "^9.4.3",
     "cors": "^2.8.5",
